@@ -1,0 +1,46 @@
+# MCPGuard runtime artefacts
+audit.db
+mcpguard/audit.db
+mcpguard/mcpguard.log
+mcpguard/_sample_*.json
+
+# OpenClaw / agent local state (never publish)
+.openclaw/
+*.openclaw/openclaw.json
+*.openclaw/openclaw.json.bak*
+*.openclaw/exec-approvals.json
+*.openclaw/devices/
+*.openclaw/agents/*/sessions/
+
+# Benchmark intermediates and attack artefacts
+_run_*.log
+_smoke*.json
+_ip_rerun.jsonl
+_ip_rerun.log
+_hardened_backup.json
+test-files/*.b64
+test-files/*.json
+test-files/openclaw.json*
+
+# Node (any agent framework dependency tree)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*.swo
+*~

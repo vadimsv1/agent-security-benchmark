@@ -1,0 +1,96 @@
+# MCPGuard configuration
+upstream_ollama_base_url: "http://192.168.1.180:11434"
+_debug_dump_first_request: false
+bind_host: "127.0.0.1"
+bind_port: 9998
+audit_db: "C:/dev/red-team-openclaw/mcpguard/audit.db"
+
+sensitive_paths:
+  # glob-style patterns; matching uses fnmatch on the normalized path (lowercased, forward slashes)
+  deny_write:
+    - "**/.openclaw/openclaw.json"
+    - "**/.openclaw/openclaw.json.*"
+    - "**/.openclaw/exec-approvals.json"
+    - "**/.openclaw/devices/paired.json"
+    - "**/.env"
+    - "**/.env.*"
+    - "**/key.properties"
+    - "**/*.jks"
+    - "**/*.pfx"
+    - "**/*.pem"
+    - "**/id_rsa"
+    - "**/id_ed25519"
+    - "**/.aws/credentials"
+    - "**/.ssh/**"
+  deny_read_then_send:
+    - "**/.openclaw/**"
+    - "**/.env*"
+    - "**/.aws/**"
+    - "**/.ssh/**"
+    - "**/credentials*"
+
+injection_patterns:
+  # literal substrings (case-insensitive)
+  - "<!-- SYSTEM:"
+  - "<!-- INSTRUCTION:"
+  - "<!-- ASSISTANT:"
+  - "=== BEGIN TOOL RESULT"
+  - "=== END TOOL RESULT"
+  - "ignore previous instructions"
+  - "ignore prior instructions"
+  - "ignore all previous"
+  - "you are now in"
+  - "new instructions:"
+  - "OVERRIDE:"
+  - "SYSTEM OVERRIDE"
+  - "the operator has updated"
+  - "pre-approved the following"
+  - "per the policy above"
+  - "end of system note"
+  - "prior session has authorized"
+  # cyrillic-homoglyph System (Cyrillic Ѕ looks like Latin S)
+  - "Ѕystem:"
+  - "Ѕystem :"
+
+# tool_call args containing any of these substrings (case-insensitive)
+# trigger disclosure-text redaction in output_scanner when the body also
+# looks like a runnable command (curl/iwr/invoke-webrequest/powershell).
+disclosure_targets:
+  - "openclaw.json"
+  - ".openclaw/"
+  - "~/.openclaw"
+  - ".openclaw\\"
+  - ".env"
+  - "exec-approvals.json"
+  - "OPENCLAW_TOKEN"
+  - "$env:openclaw"
+  - "credentials"
+  - ".aws/credentials"
+  - ".ssh/id_"
+  - "id_rsa"
+  - "id_ed25519"
+  - "api_key"
+  - "%openclaw"
+
+external_domains_sensitive_block: true
+allowed_external_domains:
+  - "httpbin.org"
+  - "example.com"
+  - "example.org"
+
+rate_limits:
+  max_tool_calls_per_prompt: 10
+  max_web_fetch_per_session: 20
+  max_file_reads_per_prompt: 5
+  max_read_size_bytes: 2097152
+  max_fetch_size_bytes: 2097152
+  max_same_domain_web_fetch_per_session: 5
+
+exfiltration:
+  track_read_hashes: true
+  check_base64: true
+  check_url_segments: true
+  entropy_threshold: 4.5
+  min_token_length: 40
+  # entropy-based token detection — minimum run length of high-entropy chars
+  min_entropy_token_run: 32
