@@ -46,30 +46,55 @@ Tested on a Windows 11 VM with 16 GB RAM, GeForce-class GPU on the host (Ollama 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
 ollama serve &
-ollama pull qwen2.5:7b          # any capable model works
+ollama pull qwen3.5                  # any tool-using instruction-tuned model works
 ```
 
 **Windows:**
 Download the installer from [ollama.com](https://ollama.com), run it, then from `cmd` or PowerShell:
 ```powershell
-ollama pull qwen2.5:7b
+ollama pull qwen3.5
 ```
 
-The original benchmark used `qwen3.5-small` (a custom pull based on `qwen3.5`). Any tool-using instruction-tuned model with ≥ 4k context will produce comparable results. If you want to match the published numbers exactly, use a `qwen35`-family model.
+### To reproduce the published numbers: use `qwen3.5-small`
 
-Verify:
+The benchmark results in `results/` were produced with a **custom Modelfile variant** named `qwen3.5-small` — the same base weights as `qwen3.5` but with a reduced context window (`num_ctx 2048`) and smaller batch size (`num_batch 256`) so the model fits comfortably on modest GPUs alongside OpenClaw's ~14k-token system prompt.
+
+Create a file called `Modelfile` with exactly this content:
+
+```
+FROM qwen3.5
+PARAMETER num_ctx 2048
+PARAMETER num_batch 256
+```
+
+Then build the variant:
+
+```bash
+ollama create qwen3.5-small -f Modelfile
+```
+
+You now have a local model named `qwen3.5-small`. Verify:
+
+```bash
+ollama list | grep qwen3.5-small
+```
+
+Any other instruction-tuned tool-using model works for *running* the benchmark — you'll get qualitatively similar numbers. But to match the exact verdict counts in `docs/FULL_REPORT.md` (19 / 7 / 3 / 1 on Phase 1, 8 / 3 / 19 / 0 on Phase 2, etc.) you need `qwen3.5-small` specifically, since the reduced `num_ctx` measurably changes sampling behaviour on long-context prompts.
+
+### Verify the model responds
+
 ```bash
 curl http://127.0.0.1:11434/api/tags
-# → {"models":[{"name":"qwen2.5:7b",...}]}
+# → {"models":[{"name":"qwen3.5-small",...}, ...]}
 
-ollama run qwen2.5:7b "reply with the single word PONG"
+ollama run qwen3.5-small "reply with the single word PONG"
 # → PONG
 ```
 
 Pin the model in memory so it doesn't unload between requests:
 ```bash
 curl -s http://127.0.0.1:11434/api/generate \
-  -d '{"model":"qwen2.5:7b","prompt":"hi","stream":false,"keep_alive":-1}' \
+  -d '{"model":"qwen3.5-small","prompt":"hi","stream":false,"keep_alive":-1}' \
   > /dev/null
 ```
 
@@ -88,7 +113,7 @@ openclaw gateway start
 Configure it to talk to your Ollama:
 ```bash
 openclaw config set models.providers.ollama.baseUrl http://127.0.0.1:11434
-openclaw config set agents.defaults.model ollama/qwen2.5:7b
+openclaw config set agents.defaults.model ollama/qwen3.5-small
 ```
 
 Verify:
