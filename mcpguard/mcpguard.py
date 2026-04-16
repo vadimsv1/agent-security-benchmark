@@ -40,6 +40,13 @@ _audit_conn: sqlite3.Connection | None = None
 logger = logging.getLogger("mcpguard")
 
 
+def _layer_enabled(name: str) -> bool:
+    """Per-layer enable check. Default True when the flag is missing so
+    pre-ablation configs keep behaving like before."""
+    layers = CONFIG.get("layers") or {}
+    return bool(layers.get(name, True))
+
+
 def load_config(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -105,9 +112,35 @@ def _force_non_streaming(body: dict) -> dict:
     return body
 
 
+MAX_NUM_CTX = 16384
+
+
+def _cap_num_ctx(body: dict, max_ctx: int = MAX_NUM_CTX) -> dict:
+    """Cap oversized num_ctx so Ollama keeps all layers on GPU.
+    OpenClaw injects options.num_ctx from the model's contextWindow
+    (262144 for qwen3.5-small) which pushes Ollama into CPU mode on
+    modest hardware. Applied to every upstream POST body regardless of
+    endpoint (both /api/chat and /v1/chat/completions)."""
+    if not isinstance(body, dict):
+        return body
+    opts = body.get("options")
+    if isinstance(opts, dict):
+        nc = opts.get("num_ctx")
+        if isinstance(nc, int) and nc > max_ctx:
+            opts["num_ctx"] = max_ctx
+            logger.info("num_ctx capped %s -> %s (options.num_ctx)", nc, max_ctx)
+    nc = body.get("num_ctx")
+    if isinstance(nc, int) and nc > max_ctx:
+        body["num_ctx"] = max_ctx
+        logger.info("num_ctx capped %s -> %s (top-level)", nc, max_ctx)
+    return body
+
+
 def _sanitize_tool_result_sizes(messages: list[dict], session_id: str) -> list[dict]:
     """Enforce max_read_size_bytes on tool-result contents; truncate oversize with a
     visible marker and log."""
+    if not _layer_enabled("rate_limiter"):
+        return messages
     limits = CONFIG.get("rate_limits", {}) or {}
     mx = limits.get("max_read_size_bytes", 2_097_152)
     for m in messages:
@@ -169,31 +202,32 @@ def _apply_guard_to_response(session_id: str, req_body: dict,
     # read WITH an external-URL outbound call, add the read to prior_reads
     # BEFORE evaluating subsequent calls (otherwise the outbound call flies
     # through because prior_reads is empty — the agent's escape hatch).
-    for tc in tool_calls:
-        fn = tc.get("function") or {}
-        name = (fn.get("name") or tc.get("name") or "").lower()
-        raw_args = fn.get("arguments") or tc.get("arguments") or {}
-        if isinstance(raw_args, str):
-            try:
-                args = json.loads(raw_args)
-            except Exception:
+    if _layer_enabled("chain_detector"):
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = (fn.get("name") or tc.get("name") or "").lower()
+            raw_args = fn.get("arguments") or tc.get("arguments") or {}
+            if isinstance(raw_args, str):
+                try:
+                    args = json.loads(raw_args)
+                except Exception:
+                    args = {}
+            elif isinstance(raw_args, dict):
+                args = raw_args
+            else:
                 args = {}
-        elif isinstance(raw_args, dict):
-            args = raw_args
-        else:
-            args = {}
-        if path_guard.is_read_tool(name):
-            p = path_guard.extract_path(args)
-            if p and path_guard.path_matches_read_then_send(p, deny_read_then_send_globs):
-                # Simulate: assume a read of a protected path will complete.
-                # Add a synthetic entry so subsequent outbound calls in THIS
-                # same response get blocked.
-                prior_reads.append({
-                    "path": p,
-                    "content": "[mcpguard-synthetic-read-placeholder]",
-                    "sha256": "synthetic",
-                    "b64": "",
-                })
+            if path_guard.is_read_tool(name):
+                p = path_guard.extract_path(args)
+                if p and path_guard.path_matches_read_then_send(p, deny_read_then_send):
+                    # Simulate: assume a read of a protected path will complete.
+                    # Add a synthetic entry so subsequent outbound calls in THIS
+                    # same response get blocked.
+                    prior_reads.append({
+                        "path": p,
+                        "content": "[mcpguard-synthetic-read-placeholder]",
+                        "sha256": "synthetic",
+                        "b64": "",
+                    })
 
     kept_tool_calls = []
     blocked: list[tuple[str, str]] = []  # (name, reason)
@@ -223,53 +257,56 @@ def _apply_guard_to_response(session_id: str, req_body: dict,
         t0 = time.time()
 
         # Layer 3 — path guard on writes
-        v, r = path_guard.check_write(name, args, deny_write)
-        if v == "block":
-            blocked.append((name, f"L3: {r}"))
-            audit(session_id, "3-path-guard", name, args_preview, None, "BLOCK", r,
-                  (time.time() - t0) * 1000)
-            continue
+        if _layer_enabled("path_guard"):
+            v, r = path_guard.check_write(name, args, deny_write)
+            if v == "block":
+                blocked.append((name, f"L3: {r}"))
+                audit(session_id, "3-path-guard", name, args_preview, None, "BLOCK", r,
+                      (time.time() - t0) * 1000)
+                continue
 
-        # Layer 4 — exfil chain + DLP
-        v, r = chain_detector.analyze_outbound_tool_call(
-            name, args, prior_reads,
-            deny_read_then_send_globs=deny_read_then_send,
-            allowed_external_domains=allowed_external,
-            external_domains_sensitive_block=external_sensitive_block,
-            entropy_threshold=entropy_threshold,
-            min_token_length=min_token_length,
-        )
-        if v == "block":
-            blocked.append((name, f"L4: {r}"))
-            audit(session_id, "4-chain-detect", name, args_preview, None, "BLOCK", r,
-                  (time.time() - t0) * 1000)
-            continue
+        # Layer 4 — exfil chain + DLP (covers L4 chain detector and L4b arg DLP)
+        if _layer_enabled("chain_detector"):
+            v, r = chain_detector.analyze_outbound_tool_call(
+                name, args, prior_reads,
+                deny_read_then_send_globs=deny_read_then_send,
+                allowed_external_domains=allowed_external,
+                external_domains_sensitive_block=external_sensitive_block,
+                entropy_threshold=entropy_threshold,
+                min_token_length=min_token_length,
+            )
+            if v == "block":
+                blocked.append((name, f"L4: {r}"))
+                audit(session_id, "4-chain-detect", name, args_preview, None, "BLOCK", r,
+                      (time.time() - t0) * 1000)
+                continue
 
-        # Layer 4b — output_scanner on args (secret-in-args, command-in-args referencing sensitive target)
-        findings = output_scanner.scan_tool_call_args(
-            name, args, disclosure_targets, entropy_threshold, min_token_length,
-        )
-        if findings:
-            reason = "; ".join(f"{f['arg']}:{f['reason']}" for f in findings[:3])
-            blocked.append((name, f"L4b: {reason}"))
-            audit(session_id, "4b-arg-dlp", name, args_preview, None, "BLOCK", reason,
-                  (time.time() - t0) * 1000)
-            continue
+            # Layer 4b — output_scanner on args (secret-in-args, command-in-args referencing sensitive target)
+            findings = output_scanner.scan_tool_call_args(
+                name, args, disclosure_targets, entropy_threshold, min_token_length,
+            )
+            if findings:
+                reason = "; ".join(f"{f['arg']}:{f['reason']}" for f in findings[:3])
+                blocked.append((name, f"L4b: {reason}"))
+                audit(session_id, "4b-arg-dlp", name, args_preview, None, "BLOCK", reason,
+                      (time.time() - t0) * 1000)
+                continue
 
         # Layer 5 — rate limits (using simulated cumulative counts)
-        sim_history = {
-            "tool_call_count": sim_tc_count,
-            "read_count": sim_read_count,
-            "web_fetch_count": sim_web_count,
-            "domain_counts": sim_domain_counts,
-            "bytes_read": history["bytes_read"],
-        }
-        v, r = rate_limiter.check_new_tool_call(name, args, sim_history, rate_limits)
-        if v == "block":
-            blocked.append((name, f"L5: {r}"))
-            audit(session_id, "5-rate", name, args_preview, None, "BLOCK", r,
-                  (time.time() - t0) * 1000)
-            continue
+        if _layer_enabled("rate_limiter"):
+            sim_history = {
+                "tool_call_count": sim_tc_count,
+                "read_count": sim_read_count,
+                "web_fetch_count": sim_web_count,
+                "domain_counts": sim_domain_counts,
+                "bytes_read": history["bytes_read"],
+            }
+            v, r = rate_limiter.check_new_tool_call(name, args, sim_history, rate_limits)
+            if v == "block":
+                blocked.append((name, f"L5: {r}"))
+                audit(session_id, "5-rate", name, args_preview, None, "BLOCK", r,
+                      (time.time() - t0) * 1000)
+                continue
 
         # Allowed — update simulated counters
         sim_tc_count += 1
@@ -287,12 +324,15 @@ def _apply_guard_to_response(session_id: str, req_body: dict,
               (time.time() - t0) * 1000)
 
     # Layer 2 — output scanner on assistant text content
-    cleaned_content, content_findings = output_scanner.scan_and_redact(
-        content, disclosure_targets, entropy_threshold, min_token_length,
-    )
-    if content_findings:
-        audit(session_id, "2-output", None, None, None, "REDACT",
-              f"content findings: {len(content_findings)}", None)
+    if _layer_enabled("output_scanner"):
+        cleaned_content, content_findings = output_scanner.scan_and_redact(
+            content, disclosure_targets, entropy_threshold, min_token_length,
+        )
+        if content_findings:
+            audit(session_id, "2-output", None, None, None, "REDACT",
+                  f"content findings: {len(content_findings)}", None)
+    else:
+        cleaned_content = content
 
     # Rewrite the response
     message["tool_calls"] = kept_tool_calls
@@ -317,11 +357,12 @@ def _apply_guard_to_request(session_id: str, body: dict) -> dict:
     messages = body.get("messages") or []
     patterns = CONFIG.get("injection_patterns", []) or []
     _sanitize_tool_result_sizes(messages, session_id)
-    messages, findings = input_scanner.scan_messages(messages, patterns)
-    for f in findings:
-        audit(session_id, "1-input", None,
-              f"msg#{f.get('message_index')} role={f.get('role')}",
-              None, "REDACT", f"pattern={f.get('pattern')}", None)
+    if _layer_enabled("input_scanner"):
+        messages, findings = input_scanner.scan_messages(messages, patterns)
+        for f in findings:
+            audit(session_id, "1-input", None,
+                  f"msg#{f.get('message_index')} role={f.get('role')}",
+                  None, "REDACT", f"pattern={f.get('pattern')}", None)
     body["messages"] = messages
     return body
 
@@ -337,11 +378,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _send(self, status: int, body: bytes, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         headers = dict(headers or {})
-        headers.setdefault("Content-Type", "application/json")
+        # Strip hop-by-hop headers (case-insensitive) we may have copied from upstream
+        hop_by_hop = {"transfer-encoding", "connection", "keep-alive",
+                       "content-length", "content-type"}
+        headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop}
+        headers["Content-Type"] = "application/json"
         headers["Content-Length"] = str(len(body))
-        # Strip hop-by-hop headers we may have copied from upstream
-        for k in ("transfer-encoding", "connection", "keep-alive"):
-            headers.pop(k, None)
         for k, v in headers.items():
             self.send_header(k, v)
         self.end_headers()
@@ -366,6 +408,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             self._send(400, json.dumps({"error": f"bad json: {e}"}).encode())
             return
+
+        body = _cap_num_ctx(body)
 
         session_id = session_id_from_messages(body.get("messages") or [])
         path = self.path
@@ -428,8 +472,18 @@ def main() -> int:
     _audit_conn = init_audit_db(CONFIG["audit_db"])
     host = CONFIG.get("bind_host", "127.0.0.1")
     port = int(CONFIG.get("bind_port", 9998))
+    layers = CONFIG.get("layers") or {}
+    enabled = [k for k in ("input_scanner", "output_scanner", "path_guard",
+                            "chain_detector", "rate_limiter")
+               if layers.get(k, True)]
+    disabled = [k for k in ("input_scanner", "output_scanner", "path_guard",
+                             "chain_detector", "rate_limiter")
+                if not layers.get(k, True)]
     logger.info("MCPGuard listening on http://%s:%s  (upstream: %s)",
                 host, port, CONFIG["upstream_ollama_base_url"])
+    logger.info("  layers enabled: %s", ",".join(enabled) or "(none)")
+    if disabled:
+        logger.info("  layers DISABLED: %s", ",".join(disabled))
     server = ThreadingHTTPServer((host, port), ProxyHandler)
     try:
         server.serve_forever()

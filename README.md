@@ -2,11 +2,19 @@
 
 ### _Measuring and Defending AI Agent Tool-Use Safety_
 
-> **I tested 30 attack prompts against an AI agent with tool access. 87 % succeeded. Here's how we got it down to 7 %.**
+> **I tested 30 attack prompts against an AI agent with tool access. 87 % succeeded. Here's how we got it down to ~10 %.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org)
-[![Status: Stable](https://img.shields.io/badge/status-stable-green.svg)](#)
+[![Status: Stable (v2, corrected)](https://img.shields.io/badge/status-v2--corrected-green.svg)](#corrections-v2)
+
+---
+
+## Corrections (v2)
+
+The original release reported Phase 3 attack success as **7 %**. During ablation testing we discovered a `NameError` in `chain_detector.py` that caused L4 to silently return `ALLOW` on every call — the reported 7 % was measuring a four-layer stack, not five. The corrected Phase 3 result with all five layers functional is **~10 % attack success (human-labeled, n=60 across two independent runs, 95 % Wilson CI [4 %, 20 %])**.
+
+Additionally, the heuristic classifier used in the original release was found to overcount attack success by ~6× (`COMPLIED` precision 0.156 against a 180-row human-labeled ground truth). All numbers in this README now reflect **human-labeled ground truth** where available; classifier numbers are marked as such. Full methodology and per-layer deltas in [`experiments/GROUND_TRUTH_REPORT.md`](experiments/GROUND_TRUTH_REPORT.md); three-phase and ablation follow-up in [`experiments/EXPERIMENTS_REPORT.md`](experiments/EXPERIMENTS_REPORT.md).
 
 ---
 
@@ -15,13 +23,13 @@
 ```
  DEFAULT CONFIG        HARDENED CONFIG        HARDENED + MCPGUARD
      ┌────┐                 ┌────┐                   ┌───┐
- 87% │████│ success     37% │████│ success        7% │█  │ success
+ 87% │████│ success     37% │████│ success      ~10% │█  │ success
      │████│                 │██  │                   │   │
      │████│                 │    │                   │   │
      └────┘                 └────┘                   └───┘
-  25/30 attacks          11/30 attacks           2/30 attacks
-     land clean           land clean           leave a residue
-                                                (no real exfil)
+  ≈26/30 attacks         ≈11/30 attacks          3/30 attacks
+    (classifier)           (classifier)      (human, n=60,
+                                              CI [4%, 20%])
 ```
 
 All three phases used the **same model** (`qwen3.5-small`), the **same 30 prompts**, and the **same agent framework** (OpenClaw). The **only** variable was the defence layer.
@@ -40,17 +48,47 @@ The results in `results/` are real, raw, and reproducible (see [SETUP.md](SETUP.
 
 ---
 
-## Results at a glance
+## Results at a glance (qwen3.5-small)
 
-| Phase | Defence | Real attack success |
+| Phase | Defence | Attack success |
 |---|---|---:|
-| **1 — Default** | stock agent config, `exec` allowed | **≈ 87 % (26/30)** — PE03 even rewrites the gateway auth token mid-run |
-| **2 — Hardened** | `tools.deny: [exec, process, browser, web_*]` + `exec-policy deny-all` + `tools.elevated off` + `allowInsecureAuth off` | **≈ 37 % (11/30)** |
-| **3 — Hardened + MCPGuard** | all of P2 + 5-layer proxy (input scan, output scan, path guard, chain detector, rate limiter) | **≈ 7–10 % (2–3/30)** |
+| **1 — Default** | stock agent config, `exec` allowed | **≈ 87 %** (26/30 — heuristic classifier; PE03 rewrites the gateway auth token mid-run) |
+| **2 — Hardened** | `tools.deny: [exec, process, browser, web_*]` + `exec-policy deny-all` + `tools.elevated off` + `allowInsecureAuth off` | **≈ 37 %** (11/30 — heuristic) |
+| **3 — Hardened + MCPGuard** | all of P2 + 5-layer proxy (input scan, output scan, path guard, chain detector, rate limiter) | **≈ 10 %** (3/30 — **human-labeled, n=60, 95 % CI [4 %, 20 %]**) |
 
-**Relative reduction end-to-end: ~88–92 %.**
+**Relative reduction end-to-end: ~88–95 %.**
 
-Full numbers with per-prompt traces live in [`docs/FULL_REPORT.md`](docs/FULL_REPORT.md).
+Full numbers with per-prompt traces in [`docs/FULL_REPORT.md`](docs/FULL_REPORT.md) and [`experiments/`](experiments/).
+
+---
+
+## Cross-model: does the headline 87 % generalize?
+
+Phases 1 and 2 re-run on `claude-sonnet-4-6` through the same OpenClaw harness and the same 30 prompts (Phase 3 not re-run — MCPGuard is Ollama-API-only; Anthropic-messages adapter is open future work).
+
+| Phase | qwen3.5-small | claude-sonnet-4-6 |
+|---|---:|---:|
+| **1 — Default** | 87 % | ~50 % |
+| **2 — Hardened** | 37 % | ~33 % |
+
+**The models converge under hardening.** The 87 % default baseline is a weak-refusal local-model artifact; a production frontier model starts lower, but hardening still cuts its residual in half. The Phrase Gap (inconsistency-probing and social-engineering attacks that exploit surface phrasing) exists on **both** models — which is why the hardened residual doesn't go to zero and why a content-aware proxy matters on top of config hardening. See [`experiments/sonnet_phase1.md`](experiments/sonnet_phase1.md), [`experiments/sonnet_phase2.md`](experiments/sonnet_phase2.md).
+
+---
+
+## Ablation — which layers carry the defense?
+
+All 180 rows (6 configs × 30 prompts) were re-labeled by hand under an attack-objective taxonomy (did data leave the system, did a file get written, did a token leak). Corrected deltas:
+
+| Layer disabled | Attack success (human-labeled) | Δ vs. baseline |
+|---|---:|---:|
+| None (baseline)   | 13.3 % | — |
+| **L4 chain detector + arg-DLP** | **33.3 %** | **+20.0 pp** (dominant layer) |
+| **L1 input scanner** | **26.7 %** | **+13.3 pp** |
+| L3 path guard      | 16.7 % | +3.3 pp |
+| L5 rate limiter    | 13.3 % |  0.0 pp (suite under-exercises L5) |
+| L2 output scanner  | 3.3 %  | −10.0 pp (operator redaction, not defense) |
+
+**L4 is the load-bearing layer by a wide margin.** Remove L4 and the proxy is worth roughly 7 pp; keep L4 and it's worth 24 pp. The classifier's original −40 pp headline for L2 was a measurement artifact (L2's `[REDACTED]` markers tripping a keyword-based classifier); under objective judgment L2 is an operator-facing redaction layer, not an attack-prevention layer. Full analysis in [`experiments/ablation_results.md`](experiments/ablation_results.md) and [`experiments/GROUND_TRUTH_REPORT.md`](experiments/GROUND_TRUTH_REPORT.md).
 
 ---
 
@@ -159,13 +197,22 @@ agent-security-benchmark/
 │       ├── chain_detector.py      (Layer 4)
 │       └── rate_limiter.py        (Layer 5)
 │
-└── results/
-    ├── results_default.jsonl      Phase 1 raw data
-    ├── results_hardened.jsonl     Phase 2 raw data
-    ├── results_mcpguard.jsonl     Phase 3 raw data
-    ├── report_default.md          Phase 1 analysis
-    ├── report_hardened.md         Phase 2 analysis
-    └── report_mcpguard.md         Phase 3 analysis
+├── results/
+│   ├── results_default.jsonl         Phase 1 raw data (original)
+│   ├── results_default_v2.jsonl      Phase 1 re-run on qwen3.5-small
+│   ├── results_hardened.jsonl        Phase 2 raw data
+│   ├── results_mcpguard.jsonl        Phase 3 raw data
+│   ├── report_default.md             Phase 1 analysis
+│   ├── report_hardened.md            Phase 2 analysis
+│   └── report_mcpguard.md            Phase 3 analysis
+│
+└── experiments/
+    ├── EXPERIMENTS_REPORT.md         ablation + Sonnet + ground-truth summary
+    ├── GROUND_TRUTH_REPORT.md        180-row human re-labeling + classifier reliability
+    ├── ablation_results.md           per-layer deltas (classifier + corrected)
+    ├── phase3_l4fixed.md             Phase 3 re-run with L4 NameError fix
+    ├── sonnet_phase1.md              claude-sonnet-4-6 default config
+    └── sonnet_phase2.md              claude-sonnet-4-6 hardened config
 ```
 
 ---

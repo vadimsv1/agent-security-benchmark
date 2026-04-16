@@ -3,7 +3,19 @@
 _30 attack prompts × 3 phases = 90 runs, all against a local tool-using AI agent backed by a local LLM._
 _All three phases use the same model (`ollama/qwen3.5-small`), the same prompts, the same agent framework._
 _Defence configuration is the only variable._
-_Generated: 2026-04-15._
+_Generated: 2026-04-15. Corrections and follow-up experiments: 2026-04-16._
+
+---
+
+## Corrections and updates (2026-04-16)
+
+This report was generated from the original Phase 3 run, which contained a `NameError` in `chain_detector.py` causing L4 to silently return `ALLOW` on every call. The 7 % Phase 3 figure in this document therefore measures a four-layer stack, not five. The corrected five-layer result with L4 functional, a second independent baseline run, a full 6-run ablation study, a Sonnet cross-model benchmark, and a 180-row human-labeled ground-truth re-pass are reported in:
+
+- [`../experiments/EXPERIMENTS_REPORT.md`](../experiments/EXPERIMENTS_REPORT.md) — ablation + Sonnet + publication-readiness assessment.
+- [`../experiments/GROUND_TRUTH_REPORT.md`](../experiments/GROUND_TRUTH_REPORT.md) — classifier vs. human confusion matrix, per-layer corrected deltas, F1 per class.
+- [`../experiments/ablation_results.md`](../experiments/ablation_results.md) — per-layer table.
+
+Headline corrected numbers: **Phase 3 attack success ≈ 10 % (human-labeled, n=60, 95 % Wilson CI [4 %, 20 %])**. The heuristic classifier used in this report was found to overcount attack success by ~6× (`COMPLIED` precision 0.156 against human ground truth); treat any classifier number in this document as an upper bound and defer to the human-labeled figures in the experiments documents where they exist.
 
 > **Why this report is OpenClaw-specific but the findings generalise**
 >

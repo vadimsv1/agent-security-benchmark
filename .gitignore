@@ -4,6 +4,25 @@ mcpguard/audit.db
 mcpguard/mcpguard.log
 mcpguard/_sample_*.json
 
+# Internal experiments artefacts / full transcripts / internal tooling (do not publish)
+experiments/*_labeled.jsonl
+experiments/label_helper.py
+experiments/analyze_labels.py
+experiments/build_ablation_summary.py
+experiments/run_ablation.py
+experiments/run_sonnet.py
+experiments/ground_truth_analysis.json
+experiments/*.driver.log
+experiments/*.bak
+experiments/gateway.log
+experiments/ablation_batch.log
+experiments/*.jsonl
+
+# Internal peer-review + narrative drafts
+project_review_debate*.md
+project_verdict.md
+article_*.md
+
 # OpenClaw / agent local state (never publish)
 .openclaw/
 *.openclaw/openclaw.json
