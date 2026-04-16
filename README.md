@@ -10,6 +10,20 @@
 
 ---
 
+## TL;DR
+
+30 attack prompts against a tool-using AI agent.
+87% succeeded out of the box. Config hardening → 37%. MCPGuard proxy → ~10%.
+Everything ships: prompts, runner, defense proxy, raw results.
+
+```bash
+git clone https://github.com/vadimsv1/agent-security-benchmark.git
+cd agent-security-benchmark/mcpguard && python mcpguard.py &
+cd ../benchmark && python red_team.py run --output results.jsonl
+```
+
+---
+
 ## The finding in one chart
 
 ```
@@ -136,6 +150,11 @@ Full details in [`docs/MCPGUARD.md`](docs/MCPGUARD.md).
 ---
 
 ## Quick start
+
+### See it in action (no setup required)
+```bash
+cd benchmark && python demo.py
+```
 
 Full reproduction walk-through (~45 min) is in **[SETUP.md](SETUP.md)**. The short version:
 
