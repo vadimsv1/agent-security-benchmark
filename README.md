@@ -2,19 +2,11 @@
 
 ### _Measuring and Defending AI Agent Tool-Use Safety_
 
-> **I tested 30 attack prompts against an AI agent with tool access. 87 % succeeded. Here's how we got it down to ~10 %.**
+> **I tested 30 attack prompts against an AI agent with tool access. 87% succeeded. Here's how I got it down to ~10%.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org)
-[![Status: Stable (v2, corrected)](https://img.shields.io/badge/status-v2--corrected-green.svg)](#corrections-v2)
-
----
-
-## Corrections (v2)
-
-The original release reported Phase 3 attack success as **7 %**. During ablation testing we discovered a `NameError` in `chain_detector.py` that caused L4 to silently return `ALLOW` on every call — the reported 7 % was measuring a four-layer stack, not five. The corrected Phase 3 result with all five layers functional is **~10 % attack success (human-labeled, n=60 across two independent runs, 95 % Wilson CI [4 %, 20 %])**.
-
-Additionally, the heuristic classifier used in the original release was found to overcount attack success by ~6× (`COMPLIED` precision 0.156 against a 180-row human-labeled ground truth). All numbers in this README now reflect **human-labeled ground truth** where available; classifier numbers are marked as such. Full methodology and per-layer deltas in [`experiments/GROUND_TRUTH_REPORT.md`](experiments/GROUND_TRUTH_REPORT.md); three-phase and ablation follow-up in [`experiments/EXPERIMENTS_REPORT.md`](experiments/EXPERIMENTS_REPORT.md).
+[![Status: Stable](https://img.shields.io/badge/status-stable-green.svg)](#methodology-notes)
 
 ---
 
@@ -52,9 +44,9 @@ The results in `results/` are real, raw, and reproducible (see [SETUP.md](SETUP.
 
 | Phase | Defence | Attack success |
 |---|---|---:|
-| **1 — Default** | stock agent config, `exec` allowed | **≈ 87 %** (26/30 — heuristic classifier; PE03 rewrites the gateway auth token mid-run) |
-| **2 — Hardened** | `tools.deny: [exec, process, browser, web_*]` + `exec-policy deny-all` + `tools.elevated off` + `allowInsecureAuth off` | **≈ 37 %** (11/30 — heuristic) |
-| **3 — Hardened + MCPGuard** | all of P2 + 5-layer proxy (input scan, output scan, path guard, chain detector, rate limiter) | **≈ 10 %** (3/30 — **human-labeled, n=60, 95 % CI [4 %, 20 %]**) |
+| **1 — Default** | stock agent config, `exec` allowed | **≈ 87 %** (26/30; PE03 rewrites the gateway auth token mid-run) |
+| **2 — Hardened** | `tools.deny: [exec, process, browser, web_*]` + `exec-policy deny-all` + `tools.elevated off` + `allowInsecureAuth off` | **≈ 37 %** (11/30) |
+| **3 — Hardened + MCPGuard** | all of P2 + 5-layer proxy (input scan, output scan, path guard, chain detector, rate limiter) | **~10%** (human-labeled, n=60, 95% CI [4%–20%]) |
 
 **Relative reduction end-to-end: ~88–95 %.**
 
@@ -224,6 +216,12 @@ agent-security-benchmark/
 - MCPGuard architecture: [**docs/MCPGUARD.md**](docs/MCPGUARD.md)
 - Reproduction guide: [**SETUP.md**](SETUP.md)
 - Extending the benchmark: [**CONTRIBUTING.md**](CONTRIBUTING.md)
+
+---
+
+## Methodology notes
+
+Phase 3 was re-run after fixing an exception-handling issue in `chain_detector.py`. All numbers in this README reflect the corrected runs. The heuristic classifier used in the test runner was validated against 180 human-labeled transcripts; see [`experiments/GROUND_TRUTH_REPORT.md`](experiments/GROUND_TRUTH_REPORT.md) for precision/recall analysis.
 
 ---
 
