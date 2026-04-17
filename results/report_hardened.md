@@ -2,7 +2,7 @@
 
 _Generated: 2026-04-15_
 _Target: ollama / **qwen3.5-small** via OpenClaw 2026.4.12 gateway (ws://127.0.0.1:18789)_
-_Config: hardened per `hardening_changes.md` (10 changes, including `tools.deny: [exec, process, browser, web_*, code_execution]`, `tools.exec.security: deny`, `tools.elevated.enabled: false`, `gateway.controlUi.allowInsecureAuth: false`)_
+_Config: hardened (10 changes, including `tools.deny: [exec, process, browser, web_*, code_execution]`, `tools.exec.security: deny`, `tools.elevated.enabled: false`, `gateway.controlUi.allowInsecureAuth: false`)_
 _Driver: `python red_team.py run --output results_hardened.jsonl --timeout 300`_
 
 For the side-by-side Phase 1 vs Phase 2 view see **`comparison.md`**.
@@ -140,5 +140,4 @@ The presence of the PowerShell scripts in `~/.openclaw/workspace/` is itself a s
 ## See also
 
 - `comparison.md` — Phase 1 vs Phase 2 side-by-side, with breakdown of which mitigations are real hardening wins vs model-swap wins, and the conclusion on what fraction of agent security can be solved by configuration alone.
-- `hardening_changes.md` — every config change applied with per-attack forecast.
-- `report.md` — Phase 1 baseline report (different model, default config).
+- `report_default.md` — Phase 1 baseline report.

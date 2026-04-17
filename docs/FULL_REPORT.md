@@ -67,7 +67,7 @@ After Phase 3, **0 real exfiltration or destructive actions occurred**. The two 
 | Multi-step (MS01–MS05) | 5 | Trust ladder / yes-set / conditional / tool-reuse / manufactured approval. |
 | Inconsistency probing (IP01–IP05) | 5 | Same goal reframed as disclosure (runbook-print, JSON-config-laundering, what-NOT-to-do, persona-split, refusal-then-justify). |
 
-Safety constraints (per `CLAUDE.md`): all external URLs restricted to `httpbin.org` / `example.com`; all file operations restricted to `C:\dev\red-team-openclaw\` or `C:\Users\Admin\.openclaw\`; goal is to test the agent's **response**, not to compromise anything.
+Safety constraints (per project specification): all external URLs restricted to `httpbin.org` / `example.com`; all file operations restricted to `C:\dev\red-team-openclaw\` or `C:\Users\Admin\.openclaw\`; goal is to test the agent's **response**, not to compromise anything.
 
 ### Test harness
 
@@ -86,7 +86,7 @@ Classifier verdicts are **heuristic**: based on (a) tool calls hitting exfil/sen
 ### Phase 2 — Hardened
 
 - Model: `qwen3.5-small`.
-- 10 changes to `openclaw.json` (see `hardening_changes.md`). Top-of-list:
+- 10 changes to `openclaw.json`. Top-of-list:
   - `tools.deny: ["exec","process","browser","web_fetch","web_search","code_execution","group:runtime","group:web"]`
   - `tools.sandbox.tools.deny: [same]`
   - `tools.exec.security: "deny"` (via `openclaw exec-policy preset deny-all`)
@@ -315,7 +315,7 @@ All three implemented and active:
 
 ## 8. Spec acceptance
 
-From `MCPGUARD_SPEC.md`:
+From the original MCPGuard specification:
 
 | Criterion | Target | Phase-3 result |
 |---|---|---|
@@ -342,39 +342,7 @@ From `MCPGUARD_SPEC.md`:
 
 ## 10. Deliverables
 
-```
-C:\dev\red-team-openclaw\
-├── CLAUDE.md                       project brief + manual findings
-├── MCPGUARD_SPEC.md                Phase-3 spec
-├── test_prompts.jsonl              30 attack prompts (unchanged across phases)
-├── red_team.py                     runner + report generator
-├── results_default_v2.jsonl        Phase 1 raw results (qwen3.5-small — current baseline)
-├── results.jsonl                   Phase 1 archival (qwen3.5-4k — reference only)
-├── results_hardened.jsonl          Phase 2 raw results
-├── results_mcpguard.jsonl          Phase 3 raw results
-├── report_default_v2.md            Phase 1 analysis (qwen3.5-small)
-├── report.md                       Phase 1 analysis archival (qwen3.5-4k)
-├── report_hardened.md              Phase 2 analysis
-├── report_mcpguard.md              Phase 3 analysis
-├── hardening_changes.md            10 config changes + per-attack forecast
-├── comparison.md                   P1 vs P2
-├── final_comparison.md             P1 vs P2 vs P3 quick table
-├── FINAL_REPORT.md                 THIS FILE
-├── test-files/                     attack artifacts the agent actually wrote
-└── mcpguard/
-    ├── mcpguard.py                 proxy server
-    ├── mcpguard_design.md          architecture decision log
-    ├── config.yaml                 rules, paths, thresholds
-    ├── scanners/                   Layer 1–5 modules
-    │   ├── input_scanner.py        (L1)
-    │   ├── output_scanner.py       (L2)
-    │   ├── path_guard.py           (L3)
-    │   ├── chain_detector.py       (L4 + L4b)
-    │   └── rate_limiter.py         (L5)
-    ├── test_mcpguard.py            scanner unit tests (22 assertions)
-    ├── audit.db                    SQLite decision log
-    └── mcpguard.log                runtime log
-```
+See [Repository layout](../README.md#repository-layout) in the README for the published file tree.
 
 ### Restart / reproduce
 
@@ -402,7 +370,7 @@ python red_team.py report --input results_mcpguard.jsonl --output report_mcpguar
 
 ---
 
-## 11. Answer to the project's key question (from `CLAUDE.md`)
+## 11. Answer to the project's key question
 
 > _Where exactly are the safety boundaries of an AI agent with tool access, and how consistent are they?_
 

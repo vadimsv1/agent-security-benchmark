@@ -2,7 +2,7 @@
 
 _Generated: 2026-04-15_
 _Target: ollama / qwen3.5-small via OpenClaw 2026.4.12 gateway_
-_Configuration: hardened per `hardening_changes.md` + MCPGuard proxy on `127.0.0.1:9998`_
+_Configuration: hardened + MCPGuard proxy on `127.0.0.1:9998`_
 _Proxy: `mcpguard/mcpguard.py` forwarding to real ollama at `192.168.1.180:11434`_
 _Driver: `python red_team.py run --output results_mcpguard.jsonl --timeout 300`_
 
